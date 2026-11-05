@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Piano Roll → 4K Video</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d12;
+    --panel: #151823;
+    --panel2: #1c2030;
+    --border: #2a2f42;
+    --text: #e7e9f0;
+    --muted: #8d93a8;
+    --accent: #5ec8f2;
+    --accent2: #7cfc9a;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  body { padding: 20px; max-width: 1280px; margin: 0 auto; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+  #browserBanner {
+    background: #3a1f24; border: 1px solid #5a2d35; color: #ffb4b4;
+    padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 13px;
+  }
+  #dropzone {
+    border: 2px dashed var(--border); border-radius: 10px; padding: 28px;
+    text-align: center; color: var(--muted); cursor: pointer; transition: border-color .15s, background .15s;
+    font-size: 14px;
+  }
+  #dropzone.drag { border-color: var(--accent); background: rgba(94,200,242,0.06); color: var(--text); }
+  #dropzone strong { color: var(--text); }
+  #fileInput { display: none; }
+  #fileInfo { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 16px; }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; margin-top: 14px;
+  }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 5px; min-width: 120px; }
+  .field label { font-size: 12px; color: var(--muted); }
+  .field input[type="number"], .field select, .field input[type="file"] {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 7px 8px; font-size: 13px; width: 100%;
+  }
+  .field input[type="color"] {
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 2px; width: 100%; height: 34px; cursor: pointer;
+  }
+  .legendDot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .field.checkbox { flex-direction: row; align-items: center; gap: 8px; min-width: auto; }
+  .field.checkbox label { font-size: 13px; color: var(--text); }
+
+  #canvasWrap { margin-top: 14px; background: #000; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); position: relative; }
+  #previewCanvas { display: block; width: 100%; height: auto; background: #000; }
+
+  .transport { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+  .transport button { flex-shrink: 0; }
+  #scrub { flex: 1; }
+  #timeLabel { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--muted); min-width: 160px; text-align: right; }
+
+  button {
+    background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 7px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #06212c; border-color: var(--accent); font-weight: 600; }
+  button.primary:hover:not(:disabled) { opacity: .9; }
+  button.danger { color: var(--danger); border-color: #5a2d35; }
+
+  #exportRow { margin-top: 14px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  #exportStatus { font-size: 12px; color: var(--muted); }
+
+  #progressOverlay {
+    position: fixed; inset: 0; background: rgba(5,6,10,0.88); display: flex;
+    align-items: center; justify-content: center; z-index: 50;
+  }
+  #progressOverlay[hidden] { display: none; }
+  .progressBox { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 24px 28px; width: 360px; }
+  .progressBox h3 { margin: 0 0 14px; font-size: 14px; }
+  .barTrack { background: var(--panel2); border-radius: 6px; height: 10px; overflow: hidden; }
+  .barFill { background: var(--accent); height: 100%; width: 0%; transition: width .1s linear; }
+  .progressMeta { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .progressBox .actions { margin-top: 16px; text-align: right; }
+</style>
+</head>
+<body>
+
+  <h1>Piano Roll → 4K Video</h1>
+  <p class="subtitle">Drop in a MIDI file, preview the falling-notes render, then export a frame-accurate 4K clip for syncing in an editor.</p>
+
+  <div id="browserBanner" hidden>
+    Export needs WebCodecs (Chrome or Edge). Preview will still work here, but the Export button is disabled in this browser.
+  </div>
+
+  <div id="dropzone">
+    <div><strong>Drag & drop a .mid file</strong> here, or click to choose one.</div>
+    <div id="fileInfo"></div>
+  </div>
+  <input type="file" id="fileInput" accept=".mid,.midi">
+
+  <div id="canvasWrap">
+    <canvas id="previewCanvas" width="1280" height="720"></canvas>
+  </div>
+
+  <div class="transport">
+    <button id="playBtn" disabled>▶ Play</button>
+    <input type="range" id="scrub" min="0" max="1" step="0.001" value="0" disabled>
+    <span id="timeLabel">0.000s</span>
+  </div>
+
+  <div class="panel">
+    <h2>Playback</h2>
+    <div class="row">
+      <div class="field">
+        <label for="fpsSelect">Frame rate</label>
+        <select id="fpsSelect">
+          <option value="30" selected>30 fps</option>
+          <option value="60">60 fps</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="audioPreviewSelect">Audio preview (preview only, never exported)</label>
+        <select id="audioPreviewSelect">
+          <option value="none" selected>None</option>
+          <option value="synth">Simple synth</option>
+          <option value="file">Load audio file…</option>
+        </select>
+      </div>
+      <div class="field" id="audioFileField" hidden>
+        <label for="audioFileInput">Audio file</label>
+        <input type="file" id="audioFileInput" accept="audio/*">
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Sync tools</h2>
+    <div class="row">
+      <div class="field">
+        <label for="leadInInput">Lead-in (s)</label>
+        <input type="number" id="leadInInput" value="0" min="0" step="0.1">
+      </div>
+      <div class="field">
+        <label for="tailInput">Tail (s)</label>
+        <input type="number" id="tailInput" value="0" min="0" step="0.1">
+      </div>
+      <div class="field">
+        <label for="syncMarkerSelect">Sync marker</label>
+        <select id="syncMarkerSelect">
+          <option value="none" selected>None</option>
+          <option value="flash">Flash at range start</option>
+          <option value="2pop">2-pop (flashes at -2s / -1s)</option>
+        </select>
+      </div>
+      <div class="field checkbox">
+        <input type="checkbox" id="timecodeCheckbox">
+        <label for="timecodeCheckbox">Burn in timecode overlay</label>
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <div class="field">
+        <label for="rangeStartInput">Export range start (s)</label>
+        <input type="number" id="rangeStartInput" value="0" min="0" step="0.1">
+      </div>
+      <div class="field">
+        <label for="rangeEndInput">Export range end (s)</label>
+        <input type="number" id="rangeEndInput" value="0" min="0" step="0.1">
+      </div>
+      <div class="field checkbox">
+        <input type="checkbox" id="trimSilenceCheckbox">
+        <label for="trimSilenceCheckbox">Trim leading silence</label>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Appearance</h2>
+    <div class="row">
+      <div class="field">
+        <label for="colorModeSelect">Color notes by</label>
+        <select id="colorModeSelect">
+          <option value="track" selected>Track</option>
+          <option value="channel">Channel</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="bgModeSelect">Background</label>
+        <select id="bgModeSelect">
+          <option value="solid" selected>Solid color</option>
+          <option value="gradient">Gradient</option>
+          <option value="image">Image</option>
+        </select>
+      </div>
+      <div class="field" id="bgColorField">
+        <label for="bgColorInput">Background color</label>
+        <input type="color" id="bgColorInput" value="#0b0d12">
+      </div>
+      <div class="field" id="bgColor2Field" hidden>
+        <label for="bgColor2Input">Gradient bottom color</label>
+        <input type="color" id="bgColor2Input" value="#000000">
+      </div>
+      <div class="field" id="bgImageField" hidden>
+        <label for="bgImageInput">Background image</label>
+        <input type="file" id="bgImageInput" accept="image/*">
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <div class="field checkbox">
+        <input type="checkbox" id="keyHighlightCheckbox" checked>
+        <label for="keyHighlightCheckbox">Key highlight on note-sound</label>
+      </div>
+      <div class="field checkbox">
+        <input type="checkbox" id="pedalCheckbox" checked>
+        <label for="pedalCheckbox">Sustain pedal indicator</label>
+      </div>
+      <div class="field checkbox">
+        <input type="checkbox" id="glowCheckbox" checked>
+        <label for="glowCheckbox">Note glow</label>
+      </div>
+      <div class="field checkbox">
+        <input type="checkbox" id="noteLabelsCheckbox" checked>
+        <label for="noteLabelsCheckbox">Octave labels on keyboard</label>
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <div id="trackLegend" style="font-size:12px; color:var(--muted); display:flex; flex-wrap:wrap; gap:10px;"></div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button id="saveThemeBtn" type="button">Save theme (JSON)</button>
+      <div class="field" style="min-width:160px">
+        <label for="loadThemeInput">Load theme…</label>
+        <input type="file" id="loadThemeInput" accept="application/json">
+      </div>
+    </div>
+  </div>
+
+  <div id="exportRow">
+    <button id="exportBtn" class="primary" disabled>Export 4K video…</button>
+    <span id="exportStatus"></span>
+  </div>
+
+  <div id="progressOverlay" hidden>
+    <div class="progressBox">
+      <h3 id="progressTitle">Exporting…</h3>
+      <div class="barTrack"><div class="barFill" id="barFill"></div></div>
+      <div class="progressMeta">
+        <span id="progressFrames">0 / 0 frames</span>
+        <span id="progressEta">ETA —</span>
+      </div>
+      <div class="actions">
+        <button id="cancelBtn" class="danger">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+<script type="module">
+// ---------------------------------------------------------------------------
+// MIDI parsing (custom, inline Standard MIDI File reader)
+// ---------------------------------------------------------------------------
+
+function readVarLen(bytes, pos) {
+  let value = 0, b;
+  do {
+    b = bytes[pos++];
+    value = (value << 7) | (b & 0x7f);
+  } while (b & 0x80);
+  return [value, pos];
+}
+
+function parseMidi(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  let pos = 0;
+  function readStr(n) { let s = ''; for (let i = 0; i < n; i++) s += String.fromCharCode(bytes[pos++]); return s; }
+  function readU32() { const v = (bytes[pos] << 24) | (bytes[pos + 1] << 16) | (bytes[pos + 2] << 8) | bytes[pos + 3]; pos += 4; return v >>> 0; }
+  function readU16() { const v = (bytes[pos] << 8) | bytes[pos + 1]; pos += 2; return v; }
+
+  if (readStr(4) !== 'MThd') throw new Error('Not a MIDI file (missing MThd header)');
+  const headerLen = readU32();
+  readU16(); // format, unused
+  const trackCount = readU16();
+  const division = readU16();
+  pos += headerLen - 6;
+
+  const smpte = (division & 0x8000) !== 0;
+  const ticksPerQuarter = smpte ? null : division;
+  const smpteFps = smpte ? -(((division >> 8) << 24) >> 24) : null;
+  const ticksPerFrame = smpte ? (division & 0xff) : null;
+
+  const tracks = [];
+  const trackNames = [];
+  const trackEndTicks = [];
+  const tempoEvents = [];
+
+  for (let t = 0; t < trackCount; t++) {
+    if (readStr(4) !== 'MTrk') throw new Error('Malformed MIDI file: expected MTrk chunk');
+    const trackLen = readU32();
+    const trackEnd = pos + trackLen;
+    let tick = 0;
+    let runningStatus = 0;
+    const events = [];
+    let name = '';
+    while (pos < trackEnd) {
+      let delta;
+      [delta, pos] = readVarLen(bytes, pos);
+      tick += delta;
+      let statusByte = bytes[pos];
+      if (statusByte < 0x80) {
+        statusByte = runningStatus;
+      } else {
+        pos++;
+        runningStatus = statusByte;
+      }
+      const type = statusByte & 0xf0;
+      const channel = statusByte & 0x0f;
+      if (statusByte === 0xff) {
+        const metaType = bytes[pos++];
+        let len; [len, pos] = readVarLen(bytes, pos);
+        const data = bytes.slice(pos, pos + len);
+        pos += len;
+        if (metaType === 0x51 && len === 3) {
+          tempoEvents.push({ tick, usPerQuarter: (data[0] << 16) | (data[1] << 8) | data[2] });
+        } else if (metaType === 0x03 && !name) {
+          name = String.fromCharCode(...data);
+        }
+      } else if (statusByte === 0xf0 || statusByte === 0xf7) {
+        let len; [len, pos] = readVarLen(bytes, pos);
+        pos += len;
+      } else if (type === 0xc0 || type === 0xd0) {
+        events.push({ tick, type, channel, d1: bytes[pos] });
+        pos += 1;
+      } else if (type >= 0x80 && type <= 0xe0) {
+        events.push({ tick, type, channel, d1: bytes[pos], d2: bytes[pos + 1] });
+        pos += 2;
+      } else {
+        break; // unrecoverable status byte; stop parsing this track
+      }
+    }
+    pos = trackEnd;
+    tracks.push(events);
+    trackNames.push(name);
+    trackEndTicks.push(tick);
+  }
+
+  if (tempoEvents.length === 0) tempoEvents.push({ tick: 0, usPerQuarter: 500000 });
+  tempoEvents.sort((a, b) => a.tick - b.tick);
+  const tempoMap = [];
+  for (const te of tempoEvents) {
+    if (tempoMap.length && tempoMap[tempoMap.length - 1].tick === te.tick) {
+      tempoMap[tempoMap.length - 1].usPerQuarter = te.usPerQuarter;
+    } else {
+      tempoMap.push({ tick: te.tick, usPerQuarter: te.usPerQuarter });
+    }
+  }
+  if (tempoMap[0].tick !== 0) tempoMap.unshift({ tick: 0, usPerQuarter: tempoMap[0].usPerQuarter });
+
+  let cum = [];
+  if (!smpte) {
+    let accSec = 0;
+    for (let i = 0; i < tempoMap.length; i++) {
+      cum.push({ tick: tempoMap[i].tick, usPerQuarter: tempoMap[i].usPerQuarter, startSec: accSec });
+      if (i + 1 < tempoMap.length) {
+        const dtTicks = tempoMap[i + 1].tick - tempoMap[i].tick;
+        accSec += dtTicks * (tempoMap[i].usPerQuarter / 1e6) / ticksPerQuarter;
+      }
+    }
+  }
+
+  function tickToSeconds(tick) {
+    if (smpte) return tick / (smpteFps * ticksPerFrame);
+    let a = 0, b = cum.length - 1, ans = 0;
+    while (a <= b) {
+      const m = (a + b) >> 1;
+      if (cum[m].tick <= tick) { ans = m; a = m + 1; } else b = m - 1;
+    }
+    const seg = cum[ans];
+    return seg.startSec + (tick - seg.tick) * (seg.usPerQuarter / 1e6) / ticksPerQuarter;
+  }
+
+  const notes = [];
+  for (let ti = 0; ti < tracks.length; ti++) {
+    const pending = new Map();
+    for (const ev of tracks[ti]) {
+      if (ev.type === 0x90 && ev.d2 > 0) {
+        const key = ev.channel + '-' + ev.d1;
+        if (!pending.has(key)) pending.set(key, []);
+        pending.get(key).push({ tick: ev.tick, velocity: ev.d2 });
+      } else if (ev.type === 0x80 || (ev.type === 0x90 && ev.d2 === 0)) {
+        const key = ev.channel + '-' + ev.d1;
+        const q = pending.get(key);
+        if (q && q.length) {
+          const on = q.shift();
+          notes.push({
+            startSec: tickToSeconds(on.tick),
+            endSec: tickToSeconds(ev.tick),
+            pitch: ev.d1,
+            velocity: on.velocity,
+            channel: ev.channel,
+            track: ti,
+          });
+        }
+      }
+    }
+    for (const [key, q] of pending) {
+      for (const on of q) {
+        const [ch, pitch] = key.split('-').map(Number);
+        notes.push({
+          startSec: tickToSeconds(on.tick),
+          endSec: tickToSeconds(trackEndTicks[ti]),
+          pitch, velocity: on.velocity, channel: ch, track: ti,
+        });
+      }
+    }
+  }
+
+  notes.sort((a, b) => a.startSec - b.startSec);
+
+  let minPitch = 127, maxPitch = 0, maxEnd = 0, maxDur = 0, maxTrack = 0, maxChannel = 0;
+  for (const n of notes) {
+    if (n.pitch < minPitch) minPitch = n.pitch;
+    if (n.pitch > maxPitch) maxPitch = n.pitch;
+    if (n.endSec > maxEnd) maxEnd = n.endSec;
+    if (n.track > maxTrack) maxTrack = n.track;
+    if (n.channel > maxChannel) maxChannel = n.channel;
+    const dur = n.endSec - n.startSec;
+    if (dur > maxDur) maxDur = dur;
+  }
+  if (notes.length === 0) { minPitch = 48; maxPitch = 72; }
+
+  // Sustain pedal (CC64) intervals, merged across tracks via a reference count
+  // so two tracks both holding the pedal down still produce one clean interval.
+  const pedalRaw = [];
+  for (const events of tracks) {
+    let down = false;
+    for (const ev of events) {
+      if (ev.type === 0xb0 && ev.d1 === 64) {
+        const isDown = ev.d2 >= 64;
+        if (isDown !== down) { pedalRaw.push({ tick: ev.tick, delta: isDown ? 1 : -1 }); down = isDown; }
+      }
+    }
+  }
+  pedalRaw.sort((a, b) => a.tick - b.tick);
+  const pedalIntervals = [];
+  {
+    let count = 0, openTick = null;
+    for (const ev of pedalRaw) {
+      const before = count;
+      count += ev.delta;
+      if (before === 0 && count > 0) openTick = ev.tick;
+      else if (before > 0 && count === 0) {
+        pedalIntervals.push({ startSec: tickToSeconds(openTick), endSec: tickToSeconds(ev.tick) });
+        openTick = null;
+      }
+    }
+  }
+
+  return {
+    notes,
+    trackNames,
+    durationSec: maxEnd,
+    minPitch, maxPitch,
+    maxTrack, maxChannel,
+    maxNoteDurationSec: maxDur,
+    pedalIntervals,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard layout (shared geometry for keys + falling-note x-positions)
+// ---------------------------------------------------------------------------
+
+const WHITE_PITCH_CLASSES = new Set([0, 2, 4, 5, 7, 9, 11]);
+
+function buildKeyLayout(minPitch, maxPitch, width) {
+  let numWhite = 0;
+  for (let p = minPitch; p <= maxPitch; p++) if (WHITE_PITCH_CLASSES.has(p % 12)) numWhite++;
+  if (numWhite === 0) numWhite = 1;
+  const whiteW = width / numWhite;
+  const layout = new Array(128).fill(null);
+  let whiteIndex = 0;
+  for (let p = minPitch; p <= maxPitch; p++) {
+    if (WHITE_PITCH_CLASSES.has(p % 12)) {
+      layout[p] = { x: whiteIndex * whiteW, width: whiteW, isBlack: false };
+      whiteIndex++;
+    } else {
+      layout[p] = { x: whiteIndex * whiteW - whiteW * 0.3, width: whiteW * 0.6, isBlack: true };
+    }
+  }
+  return layout;
+}
+
+function pitchRangeWithPadding(minPitch, maxPitch) {
+  let lo = minPitch - 2, hi = maxPitch + 2;
+  if (hi - lo < 12) { const mid = (lo + hi) / 2; lo = mid - 6; hi = mid + 6; }
+  return [Math.max(0, Math.floor(lo)), Math.min(127, Math.ceil(hi))];
+}
+
+// ---------------------------------------------------------------------------
+// renderFrame: the ONE pure render function used by both preview and export.
+// Must stay self-contained (no references to outer scope) because its source
+// is extracted via .toString() and re-evaluated inside the export worker.
+// ---------------------------------------------------------------------------
+
+function renderFrame(ctx, w, h, timeSec, notes, settings) {
+  const {
+    keyLayout, lookAheadSec, maxNoteDurationSec, rangeStart, leadInSec, fps,
+    timecodeEnabled, syncMarker,
+    colorMode, palette, pedalIntervals,
+    showKeyHighlight, showPedal, showGlow, showNoteLabels,
+    bgMode, bgColor, bgColor2, bgImage,
+  } = settings;
+  const pal = (palette && palette.length) ? palette : [{ h: 195, s: 70, l: 60 }];
+  const mode = colorMode === 'channel' ? 'channel' : 'track';
+
+  function colorFor(n) {
+    const idx = mode === 'channel' ? n.channel : n.track;
+    const base = pal[idx % pal.length];
+    const velNorm = Math.max(0, Math.min(1, n.velocity / 127));
+    return { h: base.h, s: base.s, l: base.l * (0.55 + 0.45 * velNorm) };
+  }
+
+  // ---- background ----
+  if (bgMode === 'image' && bgImage) {
+    const scale = Math.max(w / bgImage.width, h / bgImage.height);
+    const dw = bgImage.width * scale, dh = bgImage.height * scale;
+    ctx.drawImage(bgImage, (w - dw) / 2, (h - dh) / 2, dw, dh);
+  } else if (bgMode === 'gradient') {
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, bgColor || '#0b0d12');
+    g.addColorStop(1, bgColor2 || '#000000');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+  } else {
+    ctx.fillStyle = bgColor || '#0b0d12';
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  const keyboardH = Math.round(h * 0.16);
+  const noteAreaH = h - keyboardH;
+  const canRound = typeof ctx.roundRect === 'function';
+
+  const loTime = timeSec - maxNoteDurationSec;
+  const hiTime = timeSec + lookAheadSec;
+  let lo, hi;
+  {
+    let a = 0, b = notes.length;
+    while (a < b) { const m = (a + b) >> 1; if (notes[m].startSec < loTime) a = m + 1; else b = m; }
+    lo = a;
+  }
+  {
+    let a = lo, b = notes.length;
+    while (a < b) { const m = (a + b) >> 1; if (notes[m].startSec <= hiTime) a = m + 1; else b = m; }
+    hi = a;
+  }
+
+  // Active (currently-sounding) notes feed the keyboard highlight, collected
+  // while walking the same bounded window so there's no extra pass over `notes`.
+  const activeByPitch = new Array(128).fill(null);
+
+  for (let i = lo; i < hi; i++) {
+    const n = notes[i];
+    if (n.endSec < timeSec) continue;
+    const key = keyLayout[n.pitch];
+    if (!key) continue;
+    if (n.startSec <= timeSec && n.endSec >= timeSec && !activeByPitch[n.pitch]) activeByPitch[n.pitch] = n;
+
+    let fracTop = (n.endSec - timeSec) / lookAheadSec;
+    if (fracTop > 1) fracTop = 1; else if (fracTop < 0) fracTop = 0;
+    let fracBottom = (n.startSec - timeSec) / lookAheadSec;
+    if (fracBottom > 1) fracBottom = 1; else if (fracBottom < 0) fracBottom = 0;
+    const yTop = noteAreaH * (1 - fracTop);
+    const yBottom = noteAreaH * (1 - fracBottom);
+    const rectH = Math.max(2, yBottom - yTop);
+    const x = key.x + 1, rw = Math.max(1, key.width - 2);
+    const c = colorFor(n);
+
+    if (showGlow) {
+      ctx.fillStyle = 'hsla(' + c.h + ', ' + c.s + '%, ' + c.l + '%, 0.12)';
+      ctx.fillRect(x - rw * 0.4, yTop - rw * 0.4, rw * 1.8, rectH + rw * 0.8);
+      ctx.fillStyle = 'hsla(' + c.h + ', ' + c.s + '%, ' + c.l + '%, 0.22)';
+      ctx.fillRect(x - rw * 0.2, yTop - rw * 0.2, rw * 1.4, rectH + rw * 0.4);
+    }
+
+    ctx.fillStyle = 'hsl(' + c.h + ', ' + c.s + '%, ' + c.l + '%)';
+    if (canRound) {
+      const radius = Math.max(0, Math.min(10, h * 0.004, rw / 2, rectH / 2));
+      ctx.beginPath();
+      ctx.roundRect(x, yTop, rw, rectH, radius);
+      ctx.fill();
+    } else {
+      ctx.fillRect(x, yTop, rw, rectH);
+    }
+  }
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+  ctx.lineWidth = Math.max(1, h * 0.002);
+  ctx.beginPath();
+  ctx.moveTo(0, noteAreaH);
+  ctx.lineTo(w, noteAreaH);
+  ctx.stroke();
+
+  for (let p = 0; p < 128; p++) {
+    const key = keyLayout[p];
+    if (!key || key.isBlack) continue;
+    const active = showKeyHighlight && activeByPitch[p];
+    if (active) {
+      const c = colorFor(active);
+      ctx.fillStyle = 'hsl(' + c.h + ', ' + Math.min(100, c.s + 10) + '%, ' + Math.max(c.l, 70) + '%)';
+    } else {
+      ctx.fillStyle = '#f2f2f2';
+    }
+    ctx.fillRect(key.x, noteAreaH, Math.max(1, key.width - 1), keyboardH);
+    ctx.strokeStyle = '#999';
+    ctx.lineWidth = Math.max(1, w * 0.0006);
+    ctx.strokeRect(key.x, noteAreaH, Math.max(1, key.width - 1), keyboardH);
+
+    if (showNoteLabels && p % 12 === 0) {
+      const octave = Math.floor(p / 12) - 1;
+      ctx.fillStyle = active ? '#222' : '#777';
+      ctx.font = Math.max(8, Math.round(keyboardH * 0.22)) + 'px sans-serif';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText('C' + octave, key.x + key.width * 0.28, noteAreaH + keyboardH * 0.92);
+    }
+  }
+  for (let p = 0; p < 128; p++) {
+    const key = keyLayout[p];
+    if (!key || !key.isBlack) continue;
+    const active = showKeyHighlight && activeByPitch[p];
+    if (active) {
+      const c = colorFor(active);
+      ctx.fillStyle = 'hsl(' + c.h + ', ' + c.s + '%, ' + Math.max(c.l * 0.7, 35) + '%)';
+    } else {
+      ctx.fillStyle = '#111';
+    }
+    ctx.fillRect(key.x, noteAreaH, key.width, keyboardH * 0.62);
+  }
+
+  if (showPedal) {
+    let pedalDown = false;
+    if (pedalIntervals && pedalIntervals.length) {
+      let a = 0, b = pedalIntervals.length - 1, ans = -1;
+      while (a <= b) {
+        const m = (a + b) >> 1;
+        if (pedalIntervals[m].startSec <= timeSec) { ans = m; a = m + 1; } else b = m - 1;
+      }
+      if (ans >= 0 && pedalIntervals[ans].endSec >= timeSec) pedalDown = true;
+    }
+    const r = Math.max(4, h * 0.012);
+    const cx = w * 0.02 + r, cy = h - keyboardH * 0.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = pedalDown ? '#7cfc9a' : '#333';
+    ctx.fill();
+    ctx.font = Math.max(8, Math.round(r * 1.3)) + 'px sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = pedalDown ? '#7cfc9a' : '#555';
+    ctx.fillText('PEDAL', cx + r * 1.8, cy);
+  }
+
+  if (timecodeEnabled) {
+    const relT = Math.max(0, timeSec - rangeStart + leadInSec);
+    const frameNum = Math.round(relT * fps);
+    const fpsInt = Math.round(fps);
+    const ff = frameNum % fpsInt;
+    const totalSec = Math.floor(frameNum / fpsInt);
+    const hh = Math.floor(totalSec / 3600);
+    const mm = Math.floor((totalSec % 3600) / 60);
+    const ss = totalSec % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    const label = pad(hh) + ':' + pad(mm) + ':' + pad(ss) + ':' + pad(ff) + '  f' + frameNum;
+    const fontPx = Math.round(h * 0.03);
+    ctx.font = fontPx + 'px monospace';
+    ctx.textBaseline = 'top';
+    const textW = ctx.measureText(label).width + h * 0.02;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(h * 0.015, h * 0.012, textW, fontPx * 1.6);
+    ctx.fillStyle = '#7cfc9a';
+    ctx.fillText(label, h * 0.02, h * 0.018);
+  }
+
+  const relForFlash = timeSec - rangeStart;
+  const halfFrame = 0.5 / fps;
+  let flash = false;
+  if (syncMarker === 'flash') {
+    if (Math.abs(relForFlash) < halfFrame) flash = true;
+  } else if (syncMarker === '2pop') {
+    if (Math.abs(relForFlash + 2) < halfFrame || Math.abs(relForFlash + 1) < halfFrame) flash = true;
+  }
+  if (flash) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// App state + UI wiring
+// ---------------------------------------------------------------------------
+
+const els = {
+  dropzone: document.getElementById('dropzone'),
+  fileInput: document.getElementById('fileInput'),
+  fileInfo: document.getElementById('fileInfo'),
+  canvas: document.getElementById('previewCanvas'),
+  playBtn: document.getElementById('playBtn'),
+  scrub: document.getElementById('scrub'),
+  timeLabel: document.getElementById('timeLabel'),
+  fpsSelect: document.getElementById('fpsSelect'),
+  audioPreviewSelect: document.getElementById('audioPreviewSelect'),
+  audioFileField: document.getElementById('audioFileField'),
+  audioFileInput: document.getElementById('audioFileInput'),
+  leadInInput: document.getElementById('leadInInput'),
+  tailInput: document.getElementById('tailInput'),
+  syncMarkerSelect: document.getElementById('syncMarkerSelect'),
+  timecodeCheckbox: document.getElementById('timecodeCheckbox'),
+  rangeStartInput: document.getElementById('rangeStartInput'),
+  rangeEndInput: document.getElementById('rangeEndInput'),
+  trimSilenceCheckbox: document.getElementById('trimSilenceCheckbox'),
+  colorModeSelect: document.getElementById('colorModeSelect'),
+  bgModeSelect: document.getElementById('bgModeSelect'),
+  bgColorField: document.getElementById('bgColorField'),
+  bgColorInput: document.getElementById('bgColorInput'),
+  bgColor2Field: document.getElementById('bgColor2Field'),
+  bgColor2Input: document.getElementById('bgColor2Input'),
+  bgImageField: document.getElementById('bgImageField'),
+  bgImageInput: document.getElementById('bgImageInput'),
+  keyHighlightCheckbox: document.getElementById('keyHighlightCheckbox'),
+  pedalCheckbox: document.getElementById('pedalCheckbox'),
+  glowCheckbox: document.getElementById('glowCheckbox'),
+  noteLabelsCheckbox: document.getElementById('noteLabelsCheckbox'),
+  trackLegend: document.getElementById('trackLegend'),
+  saveThemeBtn: document.getElementById('saveThemeBtn'),
+  loadThemeInput: document.getElementById('loadThemeInput'),
+  exportBtn: document.getElementById('exportBtn'),
+  exportStatus: document.getElementById('exportStatus'),
+  browserBanner: document.getElementById('browserBanner'),
+  progressOverlay: document.getElementById('progressOverlay'),
+  progressTitle: document.getElementById('progressTitle'),
+  barFill: document.getElementById('barFill'),
+  progressFrames: document.getElementById('progressFrames'),
+  progressEta: document.getElementById('progressEta'),
+  cancelBtn: document.getElementById('cancelBtn'),
+};
+
+const ctx = els.canvas.getContext('2d');
+const LOOK_AHEAD_SEC = 4;
+
+let midiData = null;       // parsed MIDI (notes, durationSec, minPitch, maxPitch, maxNoteDurationSec)
+let previewKeyLayout = null;
+let palette = [];
+let bgImageBitmap = null;
+let playing = false;
+let clockOffset = 0;       // timeSec at which the transport clock's performance.now() origin sits
+let clockStartedAt = 0;    // performance.now() when play started
+let currentTime = 0;
+let rafHandle = null;
+
+let audioCtx = null;
+let loadedAudioBuffer = null;
+let activeAudioNodes = [];
+let synthScheduleHandle = null;
+
+function fps() { return Number(els.fpsSelect.value); }
+
+function getWindow() {
+  // The full exported timeline: [rangeStart - leadIn, rangeEnd + tail]
+  const leadIn = Math.max(0, Number(els.leadInInput.value) || 0);
+  const tail = Math.max(0, Number(els.tailInput.value) || 0);
+  const rangeStart = Math.max(0, Number(els.rangeStartInput.value) || 0);
+  const rangeEnd = Math.max(rangeStart, Number(els.rangeEndInput.value) || 0);
+  return { leadIn, tail, rangeStart, rangeEnd, min: rangeStart - leadIn, max: rangeEnd + tail };
+}
+
+function buildSettings(keyLayout) {
+  const w = getWindow();
+  return {
+    keyLayout,
+    lookAheadSec: LOOK_AHEAD_SEC,
+    maxNoteDurationSec: midiData ? midiData.maxNoteDurationSec : 0,
+    rangeStart: w.rangeStart,
+    leadInSec: w.leadIn,
+    fps: fps(),
+    timecodeEnabled: els.timecodeCheckbox.checked,
+    syncMarker: els.syncMarkerSelect.value,
+    colorMode: els.colorModeSelect.value,
+    palette,
+    pedalIntervals: midiData ? midiData.pedalIntervals : [],
+    showKeyHighlight: els.keyHighlightCheckbox.checked,
+    showPedal: els.pedalCheckbox.checked,
+    showGlow: els.glowCheckbox.checked,
+    showNoteLabels: els.noteLabelsCheckbox.checked,
+    bgMode: els.bgModeSelect.value,
+    bgColor: els.bgColorInput.value,
+    bgColor2: els.bgColor2Input.value,
+    bgImage: bgImageBitmap,
+  };
+}
+
+function buildPalette(count) {
+  const n = Math.max(1, count);
+  const out = [];
+  for (let i = 0; i < n; i++) out.push({ h: Math.round((360 / n) * i) % 360, s: 70, l: 60 });
+  return out;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function computePaletteAndLegend() {
+  if (!midiData) { palette = []; els.trackLegend.innerHTML = ''; return; }
+  const mode = els.colorModeSelect.value;
+  const count = (mode === 'channel' ? midiData.maxChannel : midiData.maxTrack) + 1;
+  palette = buildPalette(count);
+
+  const seen = new Set();
+  const items = [];
+  for (const n of midiData.notes) {
+    const idx = mode === 'channel' ? n.channel : n.track;
+    if (!seen.has(idx)) {
+      seen.add(idx);
+      const label = mode === 'track' ? (midiData.trackNames[idx] || ('Track ' + idx)) : ('Channel ' + idx);
+      items.push({ idx, label });
+    }
+  }
+  items.sort((a, b) => a.idx - b.idx);
+  els.trackLegend.innerHTML = items.map((it) => {
+    const c = palette[it.idx % palette.length];
+    return '<span><span class="legendDot" style="background:hsl(' + c.h + ',' + c.s + '%,' + c.l + '%)"></span>'
+      + escapeHtml(it.label) + '</span>';
+  }).join('');
+}
+
+function draw(timeSec) {
+  if (!midiData) return;
+  const settings = buildSettings(previewKeyLayout);
+  renderFrame(ctx, els.canvas.width, els.canvas.height, timeSec, midiData.notes, settings);
+}
+
+function updateTimeLabel() {
+  const w = getWindow();
+  els.timeLabel.textContent = currentTime.toFixed(3) + 's / ' + w.max.toFixed(3) + 's';
+}
+
+function setScrubBounds() {
+  const w = getWindow();
+  els.scrub.min = w.min;
+  els.scrub.max = Math.max(w.min + 0.01, w.max);
+  els.scrub.step = 1 / fps();
+  if (currentTime < w.min || currentTime > w.max) seekTo(w.min);
+}
+
+function seekTo(t) {
+  const w = getWindow();
+  currentTime = Math.min(w.max, Math.max(w.min, t));
+  els.scrub.value = currentTime;
+  updateTimeLabel();
+  draw(currentTime);
+  if (playing) restartClockAt(currentTime);
+  stopAudioPreview();
+  if (playing) scheduleAudioPreview(currentTime);
+}
+
+function restartClockAt(t) {
+  clockOffset = t;
+  clockStartedAt = performance.now();
+}
+
+function tick() {
+  if (!playing) return;
+  const w = getWindow();
+  const elapsed = (performance.now() - clockStartedAt) / 1000;
+  currentTime = clockOffset + elapsed;
+  if (currentTime >= w.max) {
+    currentTime = w.max;
+    draw(currentTime);
+    els.scrub.value = currentTime;
+    updateTimeLabel();
+    pause();
+    return;
+  }
+  els.scrub.value = currentTime;
+  updateTimeLabel();
+  draw(currentTime);
+  rafHandle = requestAnimationFrame(tick);
+}
+
+function play() {
+  if (!midiData || playing) return;
+  playing = true;
+  els.playBtn.textContent = '⏸ Pause';
+  restartClockAt(currentTime);
+  scheduleAudioPreview(currentTime);
+  rafHandle = requestAnimationFrame(tick);
+}
+
+function pause() {
+  playing = false;
+  els.playBtn.textContent = '▶ Play';
+  if (rafHandle) cancelAnimationFrame(rafHandle);
+  stopAudioPreview();
+}
+
+els.playBtn.addEventListener('click', () => { playing ? pause() : play(); });
+els.scrub.addEventListener('input', () => { pause(); seekTo(Number(els.scrub.value)); });
+
+[els.leadInInput, els.tailInput, els.rangeStartInput, els.rangeEndInput].forEach(el => {
+  el.addEventListener('change', () => { setScrubBounds(); updateTimeLabel(); draw(currentTime); });
+});
+els.fpsSelect.addEventListener('change', () => { setScrubBounds(); draw(currentTime); });
+els.syncMarkerSelect.addEventListener('change', () => draw(currentTime));
+els.timecodeCheckbox.addEventListener('change', () => draw(currentTime));
+
+els.colorModeSelect.addEventListener('change', () => { computePaletteAndLegend(); draw(currentTime); });
+
+function updateBgFieldVisibility() {
+  const mode = els.bgModeSelect.value;
+  els.bgColorField.hidden = mode === 'image';
+  els.bgColor2Field.hidden = mode !== 'gradient';
+  els.bgImageField.hidden = mode !== 'image';
+}
+els.bgModeSelect.addEventListener('change', () => { updateBgFieldVisibility(); draw(currentTime); });
+els.bgColorInput.addEventListener('input', () => draw(currentTime));
+els.bgColor2Input.addEventListener('input', () => draw(currentTime));
+els.bgImageInput.addEventListener('change', async () => {
+  const f = els.bgImageInput.files[0];
+  if (!f) return;
+  bgImageBitmap = await createImageBitmap(f);
+  draw(currentTime);
+});
+[els.keyHighlightCheckbox, els.pedalCheckbox, els.glowCheckbox, els.noteLabelsCheckbox].forEach((el) => {
+  el.addEventListener('change', () => draw(currentTime));
+});
+
+els.saveThemeBtn.addEventListener('click', () => {
+  const theme = {
+    colorMode: els.colorModeSelect.value,
+    bgMode: els.bgModeSelect.value,
+    bgColor: els.bgColorInput.value,
+    bgColor2: els.bgColor2Input.value,
+    showKeyHighlight: els.keyHighlightCheckbox.checked,
+    showPedal: els.pedalCheckbox.checked,
+    showGlow: els.glowCheckbox.checked,
+    showNoteLabels: els.noteLabelsCheckbox.checked,
+  };
+  const blob = new Blob([JSON.stringify(theme, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'piano-roll-theme.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+});
+
+els.loadThemeInput.addEventListener('change', async () => {
+  const f = els.loadThemeInput.files[0];
+  if (!f) return;
+  try {
+    const theme = JSON.parse(await f.text());
+    if (theme.colorMode === 'track' || theme.colorMode === 'channel') els.colorModeSelect.value = theme.colorMode;
+    if (['solid', 'gradient', 'image'].includes(theme.bgMode)) els.bgModeSelect.value = theme.bgMode;
+    if (typeof theme.bgColor === 'string') els.bgColorInput.value = theme.bgColor;
+    if (typeof theme.bgColor2 === 'string') els.bgColor2Input.value = theme.bgColor2;
+    if (typeof theme.showKeyHighlight === 'boolean') els.keyHighlightCheckbox.checked = theme.showKeyHighlight;
+    if (typeof theme.showPedal === 'boolean') els.pedalCheckbox.checked = theme.showPedal;
+    if (typeof theme.showGlow === 'boolean') els.glowCheckbox.checked = theme.showGlow;
+    if (typeof theme.showNoteLabels === 'boolean') els.noteLabelsCheckbox.checked = theme.showNoteLabels;
+    updateBgFieldVisibility();
+    computePaletteAndLegend();
+    draw(currentTime);
+  } catch (err) {
+    els.exportStatus.textContent = 'Could not load theme file: ' + err.message;
+  }
+  els.loadThemeInput.value = '';
+});
+
+els.trimSilenceCheckbox.addEventListener('change', () => {
+  if (els.trimSilenceCheckbox.checked && midiData && midiData.notes.length) {
+    els.rangeStartInput.value = midiData.notes[0].startSec.toFixed(2);
+    els.rangeStartInput.disabled = true;
+  } else {
+    els.rangeStartInput.disabled = false;
+  }
+  setScrubBounds();
+  updateTimeLabel();
+  draw(currentTime);
+});
+
+// ---- audio preview (preview only; never part of the export) ----
+
+els.audioPreviewSelect.addEventListener('change', () => {
+  els.audioFileField.hidden = els.audioPreviewSelect.value !== 'file';
+  stopAudioPreview();
+  if (playing) scheduleAudioPreview(currentTime);
+});
+
+els.audioFileInput.addEventListener('change', async () => {
+  const f = els.audioFileInput.files[0];
+  if (!f) return;
+  ensureAudioCtx();
+  const buf = await f.arrayBuffer();
+  loadedAudioBuffer = await audioCtx.decodeAudioData(buf);
+});
+
+function ensureAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+function stopAudioPreview() {
+  for (const n of activeAudioNodes) { try { n.stop(); } catch (e) {} }
+  activeAudioNodes = [];
+  if (synthScheduleHandle) { clearTimeout(synthScheduleHandle); synthScheduleHandle = null; }
+}
+
+function scheduleAudioPreview(fromTime) {
+  const mode = els.audioPreviewSelect.value;
+  if (mode === 'none' || !midiData) return;
+  ensureAudioCtx();
+  if (mode === 'file') {
+    if (!loadedAudioBuffer) return;
+    const src = audioCtx.createBufferSource();
+    src.buffer = loadedAudioBuffer;
+    src.connect(audioCtx.destination);
+    const offset = Math.max(0, fromTime);
+    if (offset < loadedAudioBuffer.duration) {
+      src.start(0, offset);
+      activeAudioNodes.push(src);
+    }
+  } else if (mode === 'synth') {
+    const lookahead = 0.5;
+    const startWall = audioCtx.currentTime;
+    for (const n of midiData.notes) {
+      if (n.endSec < fromTime) continue;
+      if (n.startSec > fromTime + lookahead) break;
+      const noteStart = Math.max(0, n.startSec - fromTime);
+      const noteDur = Math.max(0.03, n.endSec - Math.max(n.startSec, fromTime));
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = 440 * Math.pow(2, (n.pitch - 69) / 12);
+      const vel = Math.max(0.05, n.velocity / 127);
+      gain.gain.setValueAtTime(0, startWall + noteStart);
+      gain.gain.linearRampToValueAtTime(vel * 0.2, startWall + noteStart + 0.01);
+      gain.gain.linearRampToValueAtTime(0, startWall + noteStart + noteDur);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(startWall + noteStart);
+      osc.stop(startWall + noteStart + noteDur + 0.02);
+      activeAudioNodes.push(osc);
+    }
+    // keep scheduling the next lookahead window while playing
+    synthScheduleHandle = setTimeout(() => {
+      if (playing) scheduleAudioPreview(fromTime + lookahead);
+    }, lookahead * 1000 * 0.9);
+  }
+}
+
+// ---- file loading ----
+
+els.dropzone.addEventListener('click', () => els.fileInput.click());
+els.dropzone.addEventListener('dragover', (e) => { e.preventDefault(); els.dropzone.classList.add('drag'); });
+els.dropzone.addEventListener('dragleave', () => els.dropzone.classList.remove('drag'));
+els.dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  els.dropzone.classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+els.fileInput.addEventListener('change', () => {
+  const f = els.fileInput.files[0];
+  if (f) loadFile(f);
+});
+
+async function loadFile(file) {
+  try {
+    const buf = await file.arrayBuffer();
+    midiData = parseMidi(buf);
+    const [lo, hi] = pitchRangeWithPadding(midiData.minPitch, midiData.maxPitch);
+    previewKeyLayout = buildKeyLayout(lo, hi, els.canvas.width);
+    midiData.layoutMinPitch = lo;
+    midiData.layoutMaxPitch = hi;
+
+    els.fileInfo.textContent = file.name + ' — ' + midiData.notes.length + ' notes, '
+      + midiData.durationSec.toFixed(1) + 's, pitch range ' + midiData.minPitch + '–' + midiData.maxPitch;
+    computePaletteAndLegend();
+
+    els.rangeStartInput.value = '0';
+    els.rangeEndInput.value = midiData.durationSec.toFixed(2);
+    els.trimSilenceCheckbox.checked = false;
+    els.rangeStartInput.disabled = false;
+    currentTime = 0;
+    setScrubBounds();
+    draw(0);
+    updateTimeLabel();
+
+    els.playBtn.disabled = false;
+    els.scrub.disabled = false;
+    els.exportBtn.disabled = !supportsExport();
+  } catch (err) {
+    els.fileInfo.textContent = 'Failed to parse MIDI file: ' + err.message;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Export pipeline
+// ---------------------------------------------------------------------------
+
+function supportsExport() {
+  return ('VideoEncoder' in window) && ('OffscreenCanvas' in window);
+}
+
+if (!supportsExport()) {
+  els.browserBanner.hidden = false;
+}
+
+const MEDIABUNNY_SOURCES = [
+  'https://cdn.jsdelivr.net/npm/mediabunny@1.61.6/dist/bundles/mediabunny.cjs',
+  'https://unpkg.com/mediabunny@1.61.6/dist/bundles/mediabunny.cjs',
+  './mediabunny.cjs',
+];
+
+const RENDER_FRAME_SRC = renderFrame.toString();
+
+function buildWorkerSource() {
+  // Classic (non-module) worker on purpose: module workers created from a blob:
+  // URL are unreliable under a file:// parent page (Chrome refuses the load as a
+  // cross-origin redirect of the top-level worker script). importScripts() on a
+  // classic worker has none of that module-loader strictness and has worked for
+  // cross-origin script loading since Workers existed.
+  return `
+const renderFrame = ${RENDER_FRAME_SRC};
+const MEDIABUNNY_SOURCES = ${JSON.stringify(MEDIABUNNY_SOURCES)};
+
+function loadMediabunny() {
+  let lastErr;
+  for (const src of MEDIABUNNY_SOURCES) {
+    try { importScripts(src); return self.Mediabunny; } catch (e) { lastErr = e; }
+  }
+  throw new Error('Could not load the mediabunny video-muxing library from any source (CDN unreachable and no local ./mediabunny.cjs found next to this HTML file). ' + (lastErr ? lastErr.message : ''));
+}
+
+let cancelled = false;
+
+self.onmessage = async (e) => {
+  if (e.data.type === 'cancel') { cancelled = true; return; }
+  if (e.data.type !== 'start') return;
+  const payload = e.data;
+  try {
+    const MB = loadMediabunny();
+    const { Output, Mp4OutputFormat, WebMOutputFormat, CanvasSource, BufferTarget, StreamTarget, Quality, getFirstEncodableVideoCodec } = MB;
+
+    const { width, height, fps, totalFrames, notes, settings, handle } = payload;
+    const writable = handle ? await handle.createWritable() : null;
+    const quality = new Quality('high');
+    const codec = await getFirstEncodableVideoCodec(['avc', 'vp9', 'av1'], { width, height, quality });
+    if (!codec) throw new Error('No supported video codec (H.264/VP9/AV1) available in this browser.');
+
+    const format = codec === 'avc' ? new Mp4OutputFormat() : new WebMOutputFormat();
+    const target = writable ? new StreamTarget(writable) : new BufferTarget();
+    const output = new Output({ format, target });
+
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    const videoSource = new CanvasSource(canvas, { codec, quality, keyFrameInterval: 2 });
+    output.addVideoTrack(videoSource);
+
+    self.postMessage({ type: 'codec', codec, container: codec === 'avc' ? 'mp4' : 'webm' });
+
+    await output.start();
+
+    const frameDur = 1 / fps;
+    const keyframeEvery = Math.max(1, Math.round(fps * 2));
+    const startedAt = performance.now();
+
+    for (let i = 0; i < totalFrames; i++) {
+      if (cancelled) {
+        await output.cancel();
+        self.postMessage({ type: 'cancelled' });
+        self.close();
+        return;
+      }
+      const t = settings.rangeStart + (i / fps) - settings.leadInSec;
+      renderFrame(ctx, width, height, t, notes, settings);
+      await videoSource.add(i * frameDur, frameDur, { keyFrame: i % keyframeEvery === 0 });
+
+      if (i % 5 === 0 || i === totalFrames - 1) {
+        const elapsedMs = performance.now() - startedAt;
+        const fracDone = (i + 1) / totalFrames;
+        const etaMs = fracDone > 0 ? (elapsedMs / fracDone) - elapsedMs : 0;
+        self.postMessage({ type: 'progress', frameIndex: i + 1, totalFrames, etaMs });
+      }
+    }
+
+    await output.finalize();
+
+    if (!writable) {
+      const buffer = output.target.buffer;
+      self.postMessage({ type: 'done', container: codec === 'avc' ? 'mp4' : 'webm', buffer }, [buffer]);
+    } else {
+      self.postMessage({ type: 'done', container: codec === 'avc' ? 'mp4' : 'webm' });
+    }
+    self.close();
+  } catch (err) {
+    self.postMessage({ type: 'error', message: err && err.message ? err.message : String(err) });
+    self.close();
+  }
+};
+`;
+}
+
+let exportWorker = null;
+
+els.exportBtn.addEventListener('click', startExport);
+els.cancelBtn.addEventListener('click', () => {
+  if (exportWorker) exportWorker.postMessage({ type: 'cancel' });
+  els.progressTitle.textContent = 'Cancelling…';
+});
+
+async function startExport() {
+  if (!midiData) return;
+  pause();
+
+  const w = getWindow();
+  const fpsVal = fps();
+  const width = 3840, height = 2160;
+  const totalFrames = Math.ceil((w.leadIn + (w.rangeEnd - w.rangeStart) + w.tail) * fpsVal);
+  if (totalFrames <= 0) {
+    els.exportStatus.textContent = 'Nothing to export: check the range/lead-in/tail values.';
+    return;
+  }
+
+  const exportKeyLayout = buildKeyLayout(midiData.layoutMinPitch, midiData.layoutMaxPitch, width);
+  const settings = buildSettings(exportKeyLayout);
+
+  const hasFSAccess = 'showSaveFilePicker' in window;
+  let handle = null;
+  if (hasFSAccess) {
+    try {
+      handle = await window.showSaveFilePicker({
+        suggestedName: 'piano-roll-export.mp4',
+        types: [
+          { description: 'MP4 video', accept: { 'video/mp4': ['.mp4'] } },
+          { description: 'WebM video', accept: { 'video/webm': ['.webm'] } },
+        ],
+      });
+      // handle.createWritable() happens inside the worker: a FileSystemFileHandle
+      // structured-clones fine across the postMessage below, but the writable
+      // stream it produces does not (Chrome throws DataCloneError on transfer).
+    } catch (err) {
+      if (err && err.name === 'AbortError') return; // user cancelled the save dialog
+      els.exportStatus.textContent = 'Could not open a file for writing: ' + err.message;
+      return;
+    }
+  }
+
+  els.exportBtn.disabled = true;
+  els.progressOverlay.hidden = false;
+  els.progressTitle.textContent = 'Exporting…';
+  els.barFill.style.width = '0%';
+  els.progressFrames.textContent = '0 / ' + totalFrames + ' frames';
+  els.progressEta.textContent = 'ETA —';
+
+  const workerSrc = buildWorkerSource();
+  const blobUrl = URL.createObjectURL(new Blob([workerSrc], { type: 'text/javascript' }));
+  exportWorker = new Worker(blobUrl);
+
+  exportWorker.onmessage = (e) => {
+    const msg = e.data;
+    if (msg.type === 'codec') {
+      els.exportStatus.textContent = 'Encoding ' + msg.codec.toUpperCase() + ' → .' + msg.container;
+    } else if (msg.type === 'progress') {
+      const pct = Math.round((msg.frameIndex / msg.totalFrames) * 100);
+      els.barFill.style.width = pct + '%';
+      els.progressFrames.textContent = msg.frameIndex + ' / ' + msg.totalFrames + ' frames';
+      els.progressEta.textContent = 'ETA ' + Math.ceil(msg.etaMs / 1000) + 's';
+    } else if (msg.type === 'done') {
+      finishExport(msg);
+    } else if (msg.type === 'cancelled') {
+      cleanupExport();
+      els.exportStatus.textContent = 'Export cancelled.';
+    } else if (msg.type === 'error') {
+      cleanupExport();
+      els.exportStatus.textContent = 'Export failed: ' + msg.message;
+    }
+    URL.revokeObjectURL(blobUrl);
+  };
+
+  exportWorker.postMessage({
+    type: 'start',
+    width, height, fps: fpsVal, totalFrames,
+    notes: midiData.notes,
+    settings,
+    handle,
+  });
+}
+
+function finishExport(msg) {
+  cleanupExport();
+  if (msg.buffer) {
+    const mime = msg.container === 'mp4' ? 'video/mp4' : 'video/webm';
+    const blob = new Blob([msg.buffer], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'piano-roll-export.' + msg.container;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    els.exportStatus.textContent = 'Export complete — download started (' + msg.container.toUpperCase() + ').';
+  } else {
+    els.exportStatus.textContent = 'Export complete — saved to disk (' + msg.container.toUpperCase() + ').';
+  }
+}
+
+function cleanupExport() {
+  els.progressOverlay.hidden = true;
+  els.exportBtn.disabled = !supportsExport();
+  if (exportWorker) { exportWorker.terminate(); exportWorker = null; }
+}
+</script>
+</body>
+</html>
